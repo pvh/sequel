@@ -101,17 +101,18 @@ module Sequel
     end.new
 
     # Hash with integer keys and callable values for converting PostgreSQL types.
-    PG_TYPES = {}
+    PG_TYPES = {} # support for older plugins / monkey patches
+    PG_TYPE_NAMES = {}
     {
-      [16] => tt.method(:boolean),
-      [17] => tt.method(:bytea),
-      [20, 21, 22, 23, 26] => tt.method(:integer),
-      [700, 701] => tt.method(:float),
-      [790, 1700] => tt.method(:numeric),
-      [1083, 1266] => tt.method(:time),
-      [1114, 1184] => tt.method(:timestamp)
+      ["bool"] => tt.method(:boolean),
+      ["bytea"] => tt.method(:bytea),
+      ["int8", "int2", "int2vector", "int4", "oid"] => tt.method(:integer),
+      ["float4", "float8"] => tt.method(:float),
+      ["money", "numeric"] => tt.method(:numeric),
+      ["time", "timetz"] => tt.method(:time),
+      ["timestamp", "timestamptz"] => tt.method(:timestamp)
     }.each do |k,v|
-      k.each{|n| PG_TYPES[n] = v}
+      k.each{|n| PG_TYPE_NAMES[n] = v}
     end
     
     class << self
@@ -123,7 +124,7 @@ module Sequel
 
     # Modify the type translator for the date type depending on the value given.
     def self.use_iso_date_format=(v)
-      PG_TYPES[1082] = TYPE_TRANSLATOR.method(v ? :date_iso : :date)
+      PG_TYPE_NAMES["date"] = TYPE_TRANSLATOR.method(v ? :date_iso : :date)
       @use_iso_date_format = v
     end
     self.use_iso_date_format = true
@@ -225,9 +226,23 @@ module Sequel
         end
         conn.db = self
         conn.apply_connection_settings
+        import_types(conn)
         conn
       end
-      
+
+      # User types are supported by mapping oids to typname.
+      # When we connect, we pull down all the typnames and cache them per-database.
+      attr_reader(:pg_type_oid_to_name)
+      def import_types(conn)
+        sql = "SELECT oid, typname FROM pg_type where typtype = 'b'"
+        @pg_type_oid_to_name = {}
+        conn.execute(sql) do |res|
+          res.ntuples.times do |recnum|
+            @pg_type_oid_to_name[res.getvalue(recnum, 0).to_i] = res.getvalue(recnum, 1)
+          end
+        end
+      end
+
       # Return instance of Sequel::Postgres::Dataset with the given options.
       def dataset(opts = nil)
         Postgres::Dataset.new(self, opts)
@@ -478,13 +493,18 @@ module Sequel
           end
         end
       end
-      
+
+      def col_type_parser(oid)
+        return PG_TYPES[oid] if PG_TYPES[oid]
+        PG_TYPE_NAMES[db.pg_type_oid_to_name[oid]] if db.pg_type_oid_to_name[oid]
+      end
+
       # Set the @columns based on the result set, and return the array of
       # field numers, type conversion procs, and name symbol arrays.
       def fetch_rows_set_cols(res)
         cols = []
         res.nfields.times do |fieldnum|
-          cols << [fieldnum, PG_TYPES[res.ftype(fieldnum)], output_identifier(res.fname(fieldnum))]
+          cols << [fieldnum, col_type_parser(res.ftype(fieldnum)), output_identifier(res.fname(fieldnum))]
         end
         @columns = cols.map{|c| c.at(2)}
         cols
