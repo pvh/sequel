@@ -104,13 +104,13 @@ module Sequel
     PG_TYPES = {} # support for older plugins / monkey patches
     PG_TYPE_NAMES = {}
     {
-      ["bool"] => tt.method(:boolean),
-      ["bytea"] => tt.method(:bytea),
-      ["int8", "int2", "int2vector", "int4", "oid"] => tt.method(:integer),
-      ["float4", "float8"] => tt.method(:float),
-      ["money", "numeric"] => tt.method(:numeric),
-      ["time", "timetz"] => tt.method(:time),
-      ["timestamp", "timestamptz"] => tt.method(:timestamp)
+      [:bool] => tt.method(:boolean),
+      [:bytea] => tt.method(:bytea),
+      [:int8, :int2, :int2vector, :int4, :oid] => tt.method(:integer),
+      [:float4, :float8] => tt.method(:float),
+      [:money, :numeric] => tt.method(:numeric),
+      [:time, :timetz] => tt.method(:time),
+      [:timestamp, :timestamptz] => tt.method(:timestamp)
     }.each do |k,v|
       k.each{|n| PG_TYPE_NAMES[n] = v}
     end
@@ -124,7 +124,7 @@ module Sequel
 
     # Modify the type translator for the date type depending on the value given.
     def self.use_iso_date_format=(v)
-      PG_TYPE_NAMES["date"] = TYPE_TRANSLATOR.method(v ? :date_iso : :date)
+      PG_TYPE_NAMES[:date] = TYPE_TRANSLATOR.method(v ? :date_iso : :date)
       @use_iso_date_format = v
     end
     self.use_iso_date_format = true
@@ -238,7 +238,9 @@ module Sequel
         @pg_type_oid_to_name = {}
         conn.execute(sql) do |res|
           res.ntuples.times do |recnum|
-            @pg_type_oid_to_name[res.getvalue(recnum, 0).to_i] = res.getvalue(recnum, 1)
+            oid = res.getvalue(recnum, 0).to_i
+            name = res.getvalue(recnum, 1).to_sym
+            @pg_type_oid_to_name[oid] = name
           end
         end
       end
